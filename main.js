@@ -1,51 +1,70 @@
 /*
  * @Author: yym
  * @Date: 2024-03-13 17:57:49
- * @LastEditTime: 2024-03-14 13:49:29
+ * @LastEditTime: 2024-03-15 17:54:25
  */
-const express = require("express");
+const express = require('express');
+const fs = require('fs').promises;
+const path = require('path');
+const bodyParser = require('body-parser');
+
 const app = express();
-const fs = require("fs");
-const path = require("path");
 
-app.get("/", function (req, res) {
-  res.sendFile(__dirname + "/index.html");
-});
+app.use(express.json());
+app.use(bodyParser.urlencoded({ extended: false }));
 
-app.get("/get", function (req, res) {
-  fs.readdirSync(currentDirPath, { withFileTypes: true }).forEach(function (
-    dirent
-  ) {
-    var filePath = path.join(currentDirPath, dirent.name);
-    if (dirent.isFile()) {
-      callback(filePath, dirent);
-    } else if (dirent.isDirectory()) {
-      walkSync(filePath, callback);
+
+// 递归获取指定文件夹下所有文件
+async function getAllFiles(dir) {
+  const dirents = await fs.readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(
+    dirents.map(async (dirent) => {
+      const res = path.resolve(dir, dirent.name);
+      return dirent.isDirectory() ? getAllFiles(res) : res;
+    })
+  );
+  return [].concat(...files);
+}
+
+// 格式化文件信息为树状结构
+function formatTree(files) {
+  const tree = {};
+  for (let file of files) {
+    const { path, level, parent } = file;
+    let current = tree;
+    for (let i = 0; i <= level; i++) {
+      const segment = path.slice(0, path.indexOf('/', i === 0 ? 1 : i + 1));
+      if (!current[segment]) {
+        current[segment] = i < level ? {} : { path: segment, parent };
+      }
+      current = current[segment];
     }
-  });
+  }
+  console.log(tree[''], null, 2);
+  return JSON.stringify(tree[''], null, 2);
+}
+
+// 定义POST接口
+app.post('/list-files', async (req, res) => {
+  try {
+    const { folderPath } = req.body;
+    const folderPathResolved = path.resolve(folderPath || './'); // 获取绝对路径
+    const allFiles = await getAllFiles(folderPathResolved);
+    // const treeData = formatTree(allFiles);
+    // 将生成的JSON数据保存到文件中
+    // await fs.writeFile(`file-tree-${Date.now()}.json`, treeData);
+
+    // 确保返回的数据是JSON格式
+    res.setHeader('Content-Type', 'application/json');
+    // res.send(treeData);
+    res.send(allFiles);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'An error occurred while listing the files.' });
+  }
 });
 
-app.get("/video", function (req, res) {
-  const range = req.headers.range;
-  if (!range) res.status(400).send("Requires Range header");
-
-  const videoPath = "Chris-Do.mp4";
-  const videoSize = fs.statSync("Chris-Do.mp4").size;
-  const CHUNK_SIZE = 10 ** 6;
-  const start = Number(range.replace(/\D/g, ""));
-  const end = Math.min(start + CHUNK_SIZE, videoSize - 1);
-  const contentLength = end - start + 1;
-  const headers = {
-    "Content-Range": `bytes ${start}-${end}/${videoSize}`,
-    "Accept-Ranges": "bytes",
-    "Content-Length": contentLength,
-    "Content-Type": "video/mp4",
-  };
-  res.writeHead(206, headers);
-  const videoStream = fs.createReadStream(videoPath, { start, end });
-  videoStream.pipe(res);
-});
-
-app.listen(8000, function () {
-  console.log("Listening on port 8000!");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
